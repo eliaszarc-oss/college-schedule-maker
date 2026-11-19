@@ -100,14 +100,12 @@ Critical Instructions:
       }
     });
 
-    // Primary active Flash models with high free-tier limits and fallback chain
+    // Validated fast Flash models with high free-tier limits
     const candidateModels = [
-      "gemini-3.8-flash",
-      "gemini-3.7-flash",
-      "gemini-3.5-flash-lite",
-      "gemini-3.6-flash",
       "gemini-flash-latest",
-      "gemini-3.5-flash"
+      "gemini-3.5-flash",
+      "gemini-3.8-flash",
+      "gemini-flash-lite-latest"
     ];
 
     const modelErrors = [];
@@ -115,36 +113,26 @@ Critical Instructions:
 
     for (const model of candidateModels) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const response = await fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": apiKey
-            },
-            body: payloadBody
-          });
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
+          },
+          body: payloadBody
+        });
 
-          if (response.ok) {
-            successfulData = await response.json();
-            break;
-          } else {
-            const errBody = await response.text();
-            modelErrors.push({ model, attempt, status: response.status, error: errBody });
-            // If temporary 503 high demand spike, brief pause before retry
-            if (response.status === 503 && attempt === 0) {
-              await new Promise(r => setTimeout(r, 800));
-              continue;
-            }
-            break;
-          }
-        } catch (fetchErr) {
-          modelErrors.push({ model, attempt, status: 500, error: fetchErr.message });
+        if (response.ok) {
+          successfulData = await response.json();
           break;
+        } else {
+          const errBody = await response.text();
+          modelErrors.push({ model, status: response.status, error: errBody });
         }
+      } catch (fetchErr) {
+        modelErrors.push({ model, status: 500, error: fetchErr.message });
       }
-      if (successfulData) break;
     }
 
     if (!successfulData) {
