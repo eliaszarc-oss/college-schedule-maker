@@ -1,0 +1,10 @@
+{
+  "name": "college-schedule-maker",
+  "version": "1.0.0",
+  "description": "Instant AI Timetable & Schedule Generator from screenshots and portals",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {}
+}
