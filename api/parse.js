@@ -83,20 +83,19 @@ Rules:
       }
     });
 
-    // Model candidate endpoints to try in order of preference (v1 GA first, then v1beta)
-    const endpointsToTry = [
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key=${apiKey}`,
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`
+    // Validated models from Gemini API catalog
+    const candidateModels = [
+      "gemini-flash-latest",
+      "gemini-2.5-flash",
+      "gemini-3.5-flash",
+      "gemini-2.5-pro"
     ];
 
     let lastError = null;
     let successfulData = null;
 
-    for (const url of endpointsToTry) {
+    for (const model of candidateModels) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
       try {
         const response = await fetch(url, {
           method: "POST",
@@ -112,30 +111,18 @@ Rules:
           break;
         } else {
           const errBody = await response.text();
-          lastError = { status: response.status, body: errBody, url };
+          lastError = { status: response.status, body: errBody, model };
         }
       } catch (fetchErr) {
-        lastError = { status: 500, body: fetchErr.message, url };
+        lastError = { status: 500, body: fetchErr.message, model };
       }
     }
 
-    // If all candidate endpoints failed, query the models list to diagnose
     if (!successfulData) {
-      let availableModels = [];
-      try {
-        const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
-          headers: { "x-goog-api-key": apiKey }
-        });
-        if (listRes.ok) {
-          const listJson = await listRes.json();
-          availableModels = (listJson.models || []).map(m => m.name);
-        }
-      } catch (_) {}
-
       return res.status(lastError?.status || 500).json({
         error: `Gemini API returned status ${lastError?.status || 500}`,
         details: lastError?.body || "Failed all model candidates",
-        availableModels: availableModels.length > 0 ? availableModels : "Could not list models"
+        failedModel: lastError?.model
       });
     }
 
