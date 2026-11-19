@@ -221,6 +221,9 @@
   async function sendToAI({ imageBase64, mimeType, text }) {
     setLoading(true, "AI is analyzing schedule and identifying classes...");
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
+
     try {
       const payload = { imageBase64, mimeType, text };
       if (customApiKey) {
@@ -233,8 +236,10 @@
           "Content-Type": "application/json",
           ...(customApiKey ? { "x-api-key": customApiKey } : {})
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
 
       const result = await response.json();
 
@@ -258,8 +263,13 @@
       const parsedData = result.data;
       applyParsedSchedule(parsedData);
     } catch (err) {
+      clearTimeout(timeoutId);
       console.error("AI Parse Network Error:", err);
-      alert(`Could not connect to AI backend: ${err.message}.\n\nWhen deployed to Vercel, this works automatically. If testing locally, make sure you enter your free API key in Settings.`);
+      if (err.name === "AbortError") {
+        alert("The request timed out after 45 seconds. Please try again with a clearer or smaller image.");
+      } else {
+        alert(`Could not connect to AI backend: ${err.message}.\n\nWhen deployed to Vercel, this works automatically. If testing locally, make sure you enter your free API key in Settings.`);
+      }
     } finally {
       setLoading(false);
     }
@@ -552,11 +562,37 @@
 
     const reader = new FileReader();
     reader.onload = (e) => {
-      const base64Data = e.target.result;
-      sendToAI({
-        imageBase64: base64Data,
-        mimeType: file.type || "image/png"
-      });
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1600;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+          const c = document.createElement("canvas");
+          c.width = w;
+          c.height = h;
+          const ctx = c.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          const compressed = c.toDataURL("image/jpeg", 0.88);
+          sendToAI({
+            imageBase64: compressed,
+            mimeType: "image/jpeg"
+          });
+        } else {
+          sendToAI({
+            imageBase64: e.target.result,
+            mimeType: file.type || "image/jpeg"
+          });
+        }
+      };
+      img.src = e.target.result;
     };
     reader.readAsDataURL(file);
   }

@@ -1,5 +1,5 @@
 // Vercel Serverless Function: /api/parse
-// Extracts college course schedules from screenshots or raw text using Google Gemini Flash Vision API
+// Extracts college course schedules from screenshots, registration forms, or raw text using Google Gemini Vision API
 
 export default async function handler(req, res) {
   // CORS configuration
@@ -25,39 +25,56 @@ export default async function handler(req, res) {
   if (!apiKey) {
     return res.status(500).json({
       error: "GEMINI_API_KEY is not configured.",
-      help: "Add GEMINI_API_KEY to your Vercel project Environment Variables (or pass it in the test key field)."
+      help: "Add GEMINI_API_KEY to your Vercel project Environment Variables (or enter a key in Settings)."
     });
   }
 
-  const { imageBase64, mimeType = "image/png", text } = req.body || {};
+  const { imageBase64, mimeType = "image/jpeg", text } = req.body || {};
 
   if (!imageBase64 && !text) {
     return res.status(400).json({ error: "Please provide either an image (imageBase64) or text." });
   }
 
   const systemPrompt = `You are an expert college schedule parser and extractor.
-Your task is to analyze the user's uploaded class schedule (which may be a screenshot of a student portal like Canvas/Banner/Blackboard/AISIS, an enrollment slip, a matrix table, or raw text) and output a clean, structured JSON schedule.
+Your task is to analyze the user's uploaded class schedule, Student Registration Form (such as from Technological Institute of the Philippines / T.I.P., Canvas, Banner, Blackboard, AnimoSys, etc.), syllabus table, or photo of an enrollment slip, and extract all scheduled class meetings into clean JSON.
 
-Schema to output:
+Output Schema:
 {
-  "title": "Semester / Year title found in the schedule (e.g., '4th Year, 1st Semester', 'Fall 2026', or 'College Schedule')",
+  "title": "Semester and Year or Program found on the form (e.g. 'Second Semester 2026-2027', '3rd Year, 2nd Semester', or 'College Schedule')",
   "courses": [
     {
-      "code": "Course Code (e.g., 'CS 300', 'SAP 501', 'TECH 101', 'MATH 101')",
-      "section": "Section / Block code if present (e.g., 'CS31S4', 'IT41S5'), otherwise empty string",
-      "type": "Lecture, Lab, Asynchronous, Synchronous, Recitation, or Discussion",
-      "day": "One of: 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'",
-      "start": "24-hour start time 'HH:MM' (e.g. '06:30', '07:30', '16:30')",
-      "end": "24-hour end time 'HH:MM' (e.g. '07:30', '10:30', '18:30')",
-      "room": "Room or location code (e.g. 'Q-5313', 'Q-5216', 'Room 304'), or empty string if asynchronous/online"
+      "code": "Course Code (e.g. 'CS 006', 'CS 302', 'CSELEC 001', 'CS 300')",
+      "section": "Section or Block code (e.g. 'CS32S1', 'CS31S4'), or empty string",
+      "type": "Lecture, Lab, Asynchronous, Synchronous, or Recitation (infer from hours or room, e.g. 3-hour session is typically Lab, 1-2 hours is Lecture; if unsure default to 'Lecture')",
+      "day": "Full day name: exactly one of 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'",
+      "start": "24-hour start time in 'HH:MM' format (e.g. '07:30', '10:30', '11:30', '13:30', '14:30', '16:30')",
+      "end": "24-hour end time in 'HH:MM' format (e.g. '09:30', '12:30', '13:30', '16:30', '17:30', '18:30')",
+      "room": "Classroom / Room code (e.g. 'Q-5403', 'Q-5506', 'Q-5216', 'Q-5215', 'Q-5312'), or empty string if online/asynchronous"
     }
   ]
 }
 
-Rules:
-1. If a single course row meets on multiple days (for example 'MWF', 'Mon/Wed', 'Tue/Thu'), create a separate course object for each day.
-2. Convert all 12-hour AM/PM times into 24-hour 'HH:MM' format accurately (e.g., 6:30 AM -> "06:30", 12:00 PM -> "12:00", 4:30 PM -> "16:30", 7:00 PM -> "19:00").
-3. Do not include markdown formatting or backticks around the output. Output pure, valid JSON only.`;
+Critical Instructions:
+1. Multi-meeting courses: When a course lists multiple days/times/rooms (for example: CS 006 has 'Mo 11:30 AM - 12:30 PM Q-5403' AND 'Th 07:30 AM - 09:30 AM Q-5506'), create a separate course object for each meeting time!
+2. Day name mapping:
+   - 'Mo', 'M', 'Mon' -> 'Monday'
+   - 'Tu', 'T', 'Tue' -> 'Tuesday'
+   - 'We', 'W', 'Wed' -> 'Wednesday'
+   - 'Th', 'TH', 'Thu' -> 'Thursday'
+   - 'Fr', 'F', 'Fri' -> 'Friday'
+   - 'Sa', 'Sat', 'S' -> 'Saturday'
+   - 'Su', 'Sun' -> 'Sunday'
+3. Time conversion: Accurately convert 12-hour AM/PM times into 24-hour 'HH:MM':
+   - 07:30 AM -> "07:30"
+   - 11:30 AM -> "11:30"
+   - 12:30 PM -> "12:30"
+   - 01:30 PM -> "13:30"
+   - 02:30 PM -> "14:30"
+   - 03:30 PM -> "15:30"
+   - 04:30 PM -> "16:30"
+   - 05:30 PM -> "17:30"
+4. Disregard non-schedule sections such as Tuition Fees, Payments, Student Number, Billing, and Terms & Conditions. Focus solely on the enrolled courses schedule table.
+5. Return pure JSON without markdown backticks or commentary.`;
 
   try {
     const parts = [{ text: systemPrompt }];
@@ -65,12 +82,12 @@ Rules:
     if (imageBase64) {
       const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
       parts.push({
-        inline_data: {
-          mime_type: mimeType || "image/png",
+        inlineData: {
+          mimeType: mimeType || "image/jpeg",
           data: cleanBase64
         }
       });
-      parts.push({ text: "Please parse this schedule image into the required JSON format." });
+      parts.push({ text: "Please parse this registration form schedule into the required JSON format." });
     } else if (text) {
       parts.push({ text: `Please parse this schedule text into the required JSON format:\n\n${text}` });
     }
@@ -83,12 +100,12 @@ Rules:
       }
     });
 
-    // Validated models from Gemini API catalog
+    // Validated models available in Google Generative AI catalog
     const candidateModels = [
-      "gemini-flash-latest",
       "gemini-2.5-flash",
+      "gemini-flash-latest",
       "gemini-3.5-flash",
-      "gemini-2.5-pro"
+      "gemini-3.1-pro-preview"
     ];
 
     let lastError = null;
@@ -132,7 +149,6 @@ Rules:
       return res.status(500).json({ error: "No response text received from Gemini." });
     }
 
-    // Clean potential markdown code blocks if present
     const cleanedText = candidateText.replace(/^```json\s*/i, "").replace(/```\s*$/, "").trim();
     const parsedSchedule = JSON.parse(cleanedText);
 
