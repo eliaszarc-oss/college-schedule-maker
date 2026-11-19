@@ -239,9 +239,19 @@
       const result = await response.json();
 
       if (!response.ok || !result.success) {
-        const errMsg = result.error || "Failed to parse schedule.";
-        const help = result.help ? `\n\n${result.help}` : "";
-        alert(`AI Extraction Error: ${errMsg}${help}`);
+        let msg = result.error || "Failed to parse schedule.";
+        if (result.details) {
+          try {
+            const parsedDetails = typeof result.details === "string" ? JSON.parse(result.details) : result.details;
+            if (parsedDetails.error?.message) {
+              msg += `\n\nGoogle Error: ${parsedDetails.error.message}`;
+            }
+          } catch (_) {
+            msg += `\n\n${result.details}`;
+          }
+        }
+        if (result.help) msg += `\n\n${result.help}`;
+        alert(`AI Extraction Error:\n${msg}`);
         return;
       }
 

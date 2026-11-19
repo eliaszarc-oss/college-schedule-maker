@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, x-api-key"
+    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, x-api-key, x-goog-api-key"
   );
 
   if (req.method === "OPTIONS") {
@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed. Send a POST request." });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY || req.headers["x-api-key"] || req.body?.apiKey;
+  const apiKey = (process.env.GEMINI_API_KEY || req.headers["x-api-key"] || req.body?.apiKey || "").trim();
 
   if (!apiKey) {
     return res.status(500).json({
@@ -60,17 +60,13 @@ Rules:
 3. Do not include markdown formatting or backticks around the output. Output pure, valid JSON only.`;
 
   try {
-    const contents = [];
-    const parts = [];
-
-    parts.push({ text: systemPrompt });
+    const parts = [{ text: systemPrompt }];
 
     if (imageBase64) {
-      // Strip potential data URL prefix if sent
       const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
       parts.push({
-        inlineData: {
-          mimeType: mimeType || "image/png",
+        inline_data: {
+          mime_type: mimeType || "image/png",
           data: cleanBase64
         }
       });
@@ -79,51 +75,71 @@ Rules:
       parts.push({ text: `Please parse this schedule text into the required JSON format:\n\n${text}` });
     }
 
-    contents.push({ role: "user", parts });
-
-    // Request to Gemini API (using gemini-2.5-flash with fallback to gemini-1.5-flash)
-    let model = "gemini-2.5-flash";
-    let geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-    let response = await fetch(geminiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents,
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: "application/json"
-        }
-      })
+    const payloadBody = JSON.stringify({
+      contents: [{ role: "user", parts }],
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json"
+      }
     });
 
-    if (!response.ok) {
-      // Fallback to gemini-1.5-flash if 2.5 model is unavailable
-      model = "gemini-1.5-flash";
-      geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      response = await fetch(geminiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents,
-          generationConfig: {
-            temperature: 0.1,
-            responseMimeType: "application/json"
-          }
-        })
+    // Model candidate endpoints to try in order of preference (v1 GA first, then v1beta)
+    const endpointsToTry = [
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`
+    ];
+
+    let lastError = null;
+    let successfulData = null;
+
+    for (const url of endpointsToTry) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
+          },
+          body: payloadBody
+        });
+
+        if (response.ok) {
+          successfulData = await response.json();
+          break;
+        } else {
+          const errBody = await response.text();
+          lastError = { status: response.status, body: errBody, url };
+        }
+      } catch (fetchErr) {
+        lastError = { status: 500, body: fetchErr.message, url };
+      }
+    }
+
+    // If all candidate endpoints failed, query the models list to diagnose
+    if (!successfulData) {
+      let availableModels = [];
+      try {
+        const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
+          headers: { "x-goog-api-key": apiKey }
+        });
+        if (listRes.ok) {
+          const listJson = await listRes.json();
+          availableModels = (listJson.models || []).map(m => m.name);
+        }
+      } catch (_) {}
+
+      return res.status(lastError?.status || 500).json({
+        error: `Gemini API returned status ${lastError?.status || 500}`,
+        details: lastError?.body || "Failed all model candidates",
+        availableModels: availableModels.length > 0 ? availableModels : "Could not list models"
       });
     }
 
-    if (!response.ok) {
-      const errText = await response.text();
-      return res.status(response.status).json({
-        error: `Gemini API returned status ${response.status}`,
-        details: errText
-      });
-    }
-
-    const data = await response.json();
-    const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    const candidateText = successfulData.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!candidateText) {
       return res.status(500).json({ error: "No response text received from Gemini." });
