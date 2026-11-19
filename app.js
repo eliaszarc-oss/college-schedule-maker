@@ -222,34 +222,54 @@
     return (str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
-  // Send image or text to backend AI extraction endpoint
+  // Send image or text to backend AI extraction endpoint with auto-retry
   async function sendToAI({ imageBase64, mimeType, text }) {
     setLoading(true, "AI is analyzing schedule and identifying classes...");
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
+    const maxAttempts = 3;
+    let lastErrorMsg = "";
 
-    try {
-      const payload = { imageBase64, mimeType, text };
-      if (customApiKey) {
-        payload.apiKey = customApiKey;
-      }
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000);
 
-      const response = await fetch("/api/parse", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(customApiKey ? { "x-api-key": customApiKey } : {})
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
+      try {
+        if (attempt > 1) {
+          setLoading(true, `AI server was temporarily busy, retrying automatically... (${attempt}/${maxAttempts})`);
+          await new Promise(r => setTimeout(r, 2200));
+        }
 
-      const result = await response.json();
+        const payload = { imageBase64, mimeType, text };
+        if (customApiKey) {
+          payload.apiKey = customApiKey;
+        }
 
-      if (!response.ok || !result.success) {
-        let msg = result.error || "Failed to parse schedule.";
+        const response = await fetch("/api/parse", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(customApiKey ? { "x-api-key": customApiKey } : {})
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+          applyParsedSchedule(result.data);
+          setLoading(false);
+          return;
+        }
+
+        lastErrorMsg = result.error || "Failed to parse schedule.";
+        if (attempt < maxAttempts) {
+          console.warn(`AI attempt ${attempt} returned error, retrying...`);
+          continue;
+        }
+
+        let msg = lastErrorMsg;
         if (result.details) {
           try {
             const parsedDetails = typeof result.details === "string" ? JSON.parse(result.details) : result.details;
@@ -262,22 +282,21 @@
         }
         if (result.help) msg += `\n\n${result.help}`;
         alert(`AI Extraction Error:\n${msg}`);
-        return;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        console.error(`AI Parse Attempt ${attempt} Error:`, err);
+        if (attempt < maxAttempts) {
+          continue;
+        }
+        if (err.name === "AbortError") {
+          alert("The request timed out after 45 seconds. Please try again with a clearer or smaller image.");
+        } else {
+          alert(`Could not connect to AI backend: ${err.message}.\n\nWhen deployed to Vercel, this works automatically. If testing locally, make sure you enter your free API key in Settings.`);
+        }
       }
-
-      const parsedData = result.data;
-      applyParsedSchedule(parsedData);
-    } catch (err) {
-      clearTimeout(timeoutId);
-      console.error("AI Parse Network Error:", err);
-      if (err.name === "AbortError") {
-        alert("The request timed out after 45 seconds. Please try again with a clearer or smaller image.");
-      } else {
-        alert(`Could not connect to AI backend: ${err.message}.\n\nWhen deployed to Vercel, this works automatically. If testing locally, make sure you enter your free API key in Settings.`);
-      }
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   }
 
   // Merge parsed courses and assign harmonious pastel colors

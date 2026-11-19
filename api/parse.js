@@ -130,7 +130,7 @@ Critical Instructions:
       // Try up to 2 times for transient 503 spikes with brief backoff
       for (let attempt = 0; attempt < 2; attempt++) {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 12000); // 12s per call
+        const timer = setTimeout(() => ctrl.abort(), 16000); // 16s per candidate for complex document analysis
 
         try {
           const response = await fetch(url, {
