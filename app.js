@@ -536,11 +536,11 @@
       customApiKey = apiKeyInput.value.trim();
       if (customApiKey) {
         localStorage.setItem("dev_gemini_key", customApiKey);
+        alert("Custom API key saved!");
       } else {
         localStorage.removeItem("dev_gemini_key");
+        alert("Settings saved. Using default AI.");
       }
-      settingsModal.classList.add("hidden");
-      alert("Settings saved!");
     });
   }
 
