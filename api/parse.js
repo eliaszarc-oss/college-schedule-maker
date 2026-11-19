@@ -1,6 +1,10 @@
 // Vercel Serverless Function: /api/parse
 // Extracts college course schedules from screenshots, registration forms, or raw text using Google Gemini Vision API
 
+export const config = {
+  maxDuration: 60
+};
+
 export default async function handler(req, res) {
   // CORS configuration
   res.setHeader("Access-Control-Allow-Credentials", true);
@@ -80,11 +84,18 @@ Critical Instructions:
     const parts = [{ text: systemPrompt }];
 
     if (imageBase64) {
-      const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+      let cleanBase64 = imageBase64;
+      let detectedMime = mimeType || "image/jpeg";
+      const dataUrlMatch = cleanBase64.match(/^data:(image\/[^;]+);base64,/);
+      if (dataUrlMatch) {
+        detectedMime = dataUrlMatch[1];
+        cleanBase64 = cleanBase64.replace(/^data:image\/[^;]+;base64,/, "");
+      }
+
       parts.push({
         inlineData: {
-          mimeType: mimeType || "image/jpeg",
-          data: cleanBase64
+          mimeType: detectedMime,
+          data: cleanBase64.trim()
         }
       });
       parts.push({ text: "Please parse this registration form schedule into the required JSON format." });
@@ -102,10 +113,11 @@ Critical Instructions:
 
     // Validated fast Flash models with high free-tier limits
     const candidateModels = [
-      "gemini-flash-latest",
-      "gemini-3.5-flash",
       "gemini-3.8-flash",
-      "gemini-flash-lite-latest"
+      "gemini-3.5-flash-lite",
+      "gemini-flash-latest",
+      "gemini-3.7-flash",
+      "gemini-3.1-flash-lite"
     ];
 
     const modelErrors = [];
@@ -113,6 +125,9 @@ Critical Instructions:
 
     for (const model of candidateModels) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 9000); // 9s timeout per candidate to stay responsive
+
       try {
         const response = await fetch(url, {
           method: "POST",
@@ -120,8 +135,10 @@ Critical Instructions:
             "Content-Type": "application/json",
             "x-goog-api-key": apiKey
           },
-          body: payloadBody
+          body: payloadBody,
+          signal: ctrl.signal
         });
+        clearTimeout(timer);
 
         if (response.ok) {
           successfulData = await response.json();
@@ -131,6 +148,7 @@ Critical Instructions:
           modelErrors.push({ model, status: response.status, error: errBody });
         }
       } catch (fetchErr) {
+        clearTimeout(timer);
         modelErrors.push({ model, status: 500, error: fetchErr.message });
       }
     }
