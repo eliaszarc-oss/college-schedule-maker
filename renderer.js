@@ -1,6 +1,6 @@
 // Schedule rendering engine - exact replica of the drafting grid design
 
-export class ScheduleRenderer {
+class ScheduleRenderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -185,7 +185,6 @@ export class ScheduleRenderer {
     for (let i = 0; i <= halfHours; i++) {
       const y = gridTop + i * rowHeight;
       ctx.beginPath();
-      // Snap to integer/half pixel for razor-sharp rendering
       const alignedY = Math.round(y) + 0.5;
       ctx.moveTo(gridLeft - tickExtension, alignedY);
       ctx.lineTo(gridRight + tickExtension, alignedY);
@@ -327,3 +326,5 @@ export class ScheduleRenderer {
     return svg;
   }
 }
+
+window.ScheduleRenderer = ScheduleRenderer;

@@ -1,5 +1,8 @@
-import { initialSchedule, defaultPalette } from "./sampleData.js";
-import { ScheduleRenderer } from "./renderer.js";
+// Main Application Logic
+
+const initialSchedule = window.initialSchedule;
+const defaultPalette = window.defaultPalette;
+const ScheduleRenderer = window.ScheduleRenderer;
 
 // Application State
 let schedule = JSON.parse(localStorage.getItem("saved_schedule")) || initialSchedule;
@@ -150,7 +153,6 @@ function renderCoursesList() {
       </div>
     `;
 
-    // Event handlers for editing course inputs
     const colorPicker = card.querySelector(".color-picker");
     const codeInput = card.querySelector(".course-code");
     const sectionInput = card.querySelector(".course-section");
@@ -247,7 +249,7 @@ async function sendToAI({ imageBase64, mimeType, text }) {
     applyParsedSchedule(parsedData);
   } catch (err) {
     console.error("AI Parse Network Error:", err);
-    alert(`Could not connect to AI backend: ${err.message}.\n\nIf running locally, ensure the server is running or provide your API key in Settings.`);
+    alert(`Could not connect to AI backend: ${err.message}.\n\nWhen deployed to Vercel, this works automatically. If testing locally, make sure you enter your free API key in Settings.`);
   } finally {
     setLoading(false);
   }
@@ -323,7 +325,7 @@ function setLoading(active, statusText = "Processing...") {
 
 // Event Listeners
 function setupEventListeners() {
-  // Global Clipboard Paste (Ctrl+V) listener - permits pressing Ctrl+V anywhere
+  // Global Clipboard Paste (Ctrl+V) listener - allows pressing Ctrl+V anywhere
   window.addEventListener("paste", (e) => {
     const items = (e.clipboardData || e.originalEvent.clipboardData).items;
     for (const item of items) {

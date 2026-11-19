@@ -1,5 +1,5 @@
 // Pre-loaded sample data exactly matching the reference schedule image
-export const initialSchedule = {
+const initialSchedule = {
   title: "4th Year, 1st Semester",
   days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
   startHour: 6, // 6:00 AM
@@ -107,8 +107,8 @@ export const initialSchedule = {
   ]
 };
 
-// Pastel color palette palette for automatic assignment to new courses
-export const defaultPalette = [
+// Pastel color palette for automatic assignment to new courses
+const defaultPalette = [
   "#df8082", // Coral / Soft Red (CS 300)
   "#c3ecc8", // Mint / Light Green (CS 403)
   "#fee382", // Butter Yellow (SAP 501)
@@ -120,3 +120,7 @@ export const defaultPalette = [
   "#fcf6bd", // Lemon Chiffon
   "#d0f4de"  // Light Seafoam
 ];
+
+// Attach to global window
+window.initialSchedule = initialSchedule;
+window.defaultPalette = defaultPalette;
