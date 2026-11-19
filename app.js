@@ -25,6 +25,7 @@
   const startHourSelect = document.getElementById("startHourSelect");
   const endHourSelect = document.getElementById("endHourSelect");
   const autoFitBtn = document.getElementById("autoFitBtn");
+  const vacantToggle = document.getElementById("vacantToggle");
   const coursesList = document.getElementById("coursesList");
   const addCourseBtn = document.getElementById("addCourseBtn");
 
@@ -75,6 +76,10 @@
       daysFilter.value = "6";
     } else {
       daysFilter.value = "7";
+    }
+
+    if (vacantToggle) {
+      vacantToggle.checked = !!schedule.showVacant;
     }
 
     renderCoursesList();
@@ -440,6 +445,14 @@
       autoFitTimeRange();
       render();
     });
+
+    // Vacant Hours toggle
+    if (vacantToggle) {
+      vacantToggle.addEventListener("change", (e) => {
+        schedule.showVacant = e.target.checked;
+        render();
+      });
+    }
 
     // Add Course Button
     addCourseBtn.addEventListener("click", () => {

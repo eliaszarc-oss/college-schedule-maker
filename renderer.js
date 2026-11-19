@@ -26,13 +26,48 @@
       return `${hours}:${minStr}${ampm}`;
     }
 
+    // Identify gaps (vacant hours) between scheduled classes on each day
+    static getVacantSlots(courses, days, startHour, endHour) {
+      const vacantSlots = [];
+      days.forEach((day, dayIndex) => {
+        const dayCourses = courses
+          .filter(c => c.day === day)
+          .map(c => ({
+            ...c,
+            startDec: ScheduleRenderer.timeToDecimal(c.start),
+            endDec: ScheduleRenderer.timeToDecimal(c.end)
+          }))
+          .filter(c => c.endDec > startHour && c.startDec < endHour)
+          .sort((a, b) => a.startDec - b.startDec);
+
+        if (dayCourses.length >= 2) {
+          for (let i = 0; i < dayCourses.length - 1; i++) {
+            const cEnd = Math.max(dayCourses[i].endDec, startHour);
+            const nStart = Math.min(dayCourses[i + 1].startDec, endHour);
+            const gap = nStart - cEnd;
+            if (gap >= 0.5) {
+              vacantSlots.push({
+                day,
+                dayIndex,
+                start: cEnd,
+                end: nStart,
+                duration: gap
+              });
+            }
+          }
+        }
+      });
+      return vacantSlots;
+    }
+
     render(schedule) {
       const {
         title = "4th Year, 1st Semester",
         days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
         startHour = 6,
         endHour = 19,
-        courses = []
+        courses = [],
+        showVacant = false
       } = schedule;
 
       const scale = this.scale;
@@ -43,7 +78,7 @@
       const colWidth = 105;
       const totalCols = days.length;
       const gridWidth = colWidth * totalCols;
-      const topMargin = 70; // Room for title & day labels
+      const topMargin = 70;
       const dayLabelY = 56;
       const titleY = 28;
       const bottomMargin = 40;
@@ -100,7 +135,55 @@
         ctx.fillText(timeLabel, gridLeft - 10, y);
       }
 
-      // 5. Render Course Blocks (drawn before/under grid lines or with neat clipping)
+      // 5. Render Vacant Hours (if enabled)
+      if (showVacant) {
+        const vacantSlots = ScheduleRenderer.getVacantSlots(courses, days, startHour, endHour);
+        vacantSlots.forEach(slot => {
+          const vTop = gridTop + (slot.start - startHour) * 2 * rowHeight;
+          const vHeight = (slot.end - slot.start) * 2 * rowHeight;
+          const vLeft = gridLeft + slot.dayIndex * colWidth;
+          const vWidth = colWidth;
+
+          const padX = 2;
+          const padY = 2;
+          const r = 4;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(vLeft + padX, vTop + padY, vWidth - padX * 2, vHeight - padY * 2, r);
+
+          ctx.fillStyle = "#f8fafc";
+          ctx.fill();
+
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.strokeStyle = "#94a3b8";
+          ctx.stroke();
+
+          ctx.setLineDash([]);
+          ctx.fillStyle = "#64748b";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+
+          const centerX = vLeft + vWidth / 2;
+          const centerY = vTop + vHeight / 2;
+          const durationStr = slot.duration === 1 ? "1 hr" : (slot.duration % 1 === 0 ? `${slot.duration} hrs` : `${Math.floor(slot.duration)}h 30m`);
+
+          if (vHeight >= 45) {
+            ctx.font = "bold 9px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+            ctx.fillText("VACANT", centerX, centerY - 6);
+            ctx.font = "normal 8px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+            ctx.fillText(`(${durationStr})`, centerX, centerY + 6);
+          } else if (vHeight >= 22) {
+            ctx.font = "bold 8.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+            ctx.fillText(`Vacant (${durationStr})`, centerX, centerY);
+          }
+
+          ctx.restore();
+        });
+      }
+
+      // 6. Render Course Blocks
       courses.forEach(course => {
         const dayIndex = days.indexOf(course.day);
         if (dayIndex === -1) return;
@@ -118,7 +201,6 @@
         const blockLeft = gridLeft + dayIndex * colWidth;
         const blockWidth = colWidth;
 
-        // Inset slightly by 1px so block sits cleanly inside grid cells with rounded corners
         const padX = 1;
         const padY = 1;
         const r = 5; // rounded corner radius
@@ -142,50 +224,50 @@
         ctx.textBaseline = "top";
 
         const textX = blockLeft + 5;
-        let textY = blockTop + 5;
+        const isCompact = blockHeight <= 60; // 1-hour block is 56px
+        let textY = blockTop + (isCompact ? 3.5 : 5);
 
         // Line 1: Course Code & Section (Bold)
-        ctx.font = "bold 10.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        ctx.font = (isCompact ? "bold 10px " : "bold 10.5px ") + "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
         const line1 = course.section ? `${course.code} [${course.section}]` : course.code;
         ctx.fillText(line1, textX, textY);
-        textY += 13;
+        textY += isCompact ? 11.5 : 13;
 
         // Line 2: Type (Bold, smaller)
-        if (course.type && blockHeight > 30) {
-          ctx.font = "bold 9.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        if (course.type && blockHeight >= 28) {
+          ctx.font = (isCompact ? "bold 9px " : "bold 9.5px ") + "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
           ctx.fillText(course.type, textX, textY);
-          textY += 12;
+          textY += isCompact ? 10.5 : 12;
         }
 
         // Line 3: Time Span (Regular)
-        if (blockHeight > 45) {
-          ctx.font = "normal 8.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        if (blockHeight >= 42) {
+          ctx.font = (isCompact ? "normal 8px " : "normal 8.5px ") + "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
           const formattedTime = `${ScheduleRenderer.formatTime(courseStart)}-${ScheduleRenderer.formatTime(courseEnd)}`;
           ctx.fillText(formattedTime, textX, textY);
-          textY += 11;
+          textY += isCompact ? 10 : 11;
         }
 
-        // Line 4: Room (Regular)
-        if (course.room && blockHeight > 58) {
-          ctx.font = "normal 8.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        // Line 4: Room (Regular) - displays for all 1-hour and longer courses
+        if (course.room && blockHeight >= 48) {
+          ctx.font = (isCompact ? "normal 8px " : "normal 8.5px ") + "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
           ctx.fillText(course.room, textX, textY);
         }
 
         ctx.restore();
       });
 
-      // 6. Render Drafting Grid Lines with Characteristic Extended Border Ticks
+      // 7. Render Drafting Grid Lines with Characteristic Extended Border Ticks
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = "#000000";
       ctx.lineCap = "square";
 
-      const tickExtension = 9; // Grid lines extend 9px past outer border
+      const tickExtension = 9;
 
       // Horizontal Lines
       for (let i = 0; i <= halfHours; i++) {
         const y = gridTop + i * rowHeight;
         ctx.beginPath();
-        // Snap to integer/half pixel for razor-sharp rendering
         const alignedY = Math.round(y) + 0.5;
         ctx.moveTo(gridLeft - tickExtension, alignedY);
         ctx.lineTo(gridRight + tickExtension, alignedY);
@@ -217,7 +299,8 @@
         days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
         startHour = 6,
         endHour = 19,
-        courses = []
+        courses = [],
+        showVacant = false
       } = schedule;
 
       const timeColWidth = 70;
@@ -249,9 +332,11 @@
       svg += `    .title { font-weight: bold; font-size: 15px; text-anchor: middle; }\n`;
       svg += `    .day { font-weight: 500; font-size: 13px; text-anchor: middle; }\n`;
       svg += `    .time { font-weight: 500; font-size: 11px; text-anchor: end; }\n`;
-      svg += `    .course-title { font-weight: bold; font-size: 10.5px; fill: #000; }\n`;
-      svg += `    .course-type { font-weight: bold; font-size: 9.5px; fill: #000; }\n`;
-      svg += `    .course-sub { font-size: 8.5px; fill: #000; }\n`;
+      svg += `    .course-title { font-weight: bold; font-size: 10px; fill: #000; }\n`;
+      svg += `    .course-type { font-weight: bold; font-size: 9px; fill: #000; }\n`;
+      svg += `    .course-sub { font-size: 8px; fill: #000; }\n`;
+      svg += `    .vacant-text { font-size: 8.5px; font-weight: bold; fill: #64748b; text-anchor: middle; }\n`;
+      svg += `    .vacant-sub { font-size: 7.5px; fill: #64748b; text-anchor: middle; }\n`;
       svg += `  </style>\n`;
 
       // Background
@@ -273,7 +358,31 @@
         svg += `  <text x="${gridLeft - 10}" y="${y}" class="time">${ScheduleRenderer.formatTime(currentHour)}</text>\n`;
       }
 
-      // Courses
+      // Vacant hours in SVG
+      if (showVacant) {
+        const vacantSlots = ScheduleRenderer.getVacantSlots(courses, days, startHour, endHour);
+        vacantSlots.forEach(slot => {
+          const vTop = gridTop + (slot.start - startHour) * 2 * rowHeight + 2;
+          const vHeight = (slot.end - slot.start) * 2 * rowHeight - 4;
+          const vLeft = gridLeft + slot.dayIndex * colWidth + 2;
+          const vWidth = colWidth - 4;
+          const centerX = vLeft + vWidth / 2;
+          const centerY = vTop + vHeight / 2;
+          const durationStr = slot.duration === 1 ? "1 hr" : (slot.duration % 1 === 0 ? `${slot.duration} hrs` : `${Math.floor(slot.duration)}h 30m`);
+
+          svg += `  <g>\n`;
+          svg += `    <rect x="${vLeft}" y="${vTop}" width="${vWidth}" height="${vHeight}" rx="4" ry="4" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3" />\n`;
+          if (vHeight >= 45) {
+            svg += `    <text x="${centerX}" y="${centerY - 2}" class="vacant-text">VACANT</text>\n`;
+            svg += `    <text x="${centerX}" y="${centerY + 10}" class="vacant-sub">(${durationStr})</text>\n`;
+          } else if (vHeight >= 22) {
+            svg += `    <text x="${centerX}" y="${centerY + 3}" class="vacant-text">Vacant (${durationStr})</text>\n`;
+          }
+          svg += `  </g>\n`;
+        });
+      }
+
+      // Courses in SVG
       courses.forEach(course => {
         const dayIndex = days.indexOf(course.day);
         if (dayIndex === -1) return;
@@ -289,25 +398,27 @@
         const blockLeft = gridLeft + dayIndex * colWidth + 1;
         const blockWidth = colWidth - 2;
 
+        const isCompact = blockHeight <= 60;
+        let textY = blockTop + (isCompact ? 12 : 14);
+
         svg += `  <g>\n`;
         svg += `    <rect x="${blockLeft}" y="${blockTop}" width="${blockWidth}" height="${blockHeight}" rx="5" ry="5" fill="${course.color || '#c3ecc8'}" stroke="#000000" stroke-width="1.5" />\n`;
         
         const textX = blockLeft + 4;
-        let textY = blockTop + 14;
         const line1 = course.section ? `${course.code} [${course.section}]` : course.code;
         svg += `    <text x="${textX}" y="${textY}" class="course-title">${line1}</text>\n`;
-        textY += 13;
+        textY += isCompact ? 11 : 13;
 
-        if (course.type && blockHeight > 30) {
+        if (course.type && blockHeight >= 28) {
           svg += `    <text x="${textX}" y="${textY}" class="course-type">${course.type}</text>\n`;
-          textY += 12;
+          textY += isCompact ? 10 : 12;
         }
-        if (blockHeight > 45) {
+        if (blockHeight >= 42) {
           const timeStr = `${ScheduleRenderer.formatTime(courseStart)}-${ScheduleRenderer.formatTime(courseEnd)}`;
           svg += `    <text x="${textX}" y="${textY}" class="course-sub">${timeStr}</text>\n`;
-          textY += 11;
+          textY += isCompact ? 10 : 11;
         }
-        if (course.room && blockHeight > 58) {
+        if (course.room && blockHeight >= 48) {
           svg += `    <text x="${textX}" y="${textY}" class="course-sub">${course.room}</text>\n`;
         }
         svg += `  </g>\n`;
