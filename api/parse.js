@@ -111,13 +111,14 @@ Critical Instructions:
       }
     });
 
-    // Validated fast Flash models with high free-tier limits
+    // Diverse independent model families to avoid shared pool exhaustion
     const candidateModels = [
-      "gemini-3.8-flash",
       "gemini-3.5-flash-lite",
-      "gemini-flash-latest",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite"
+      "gemini-3.1-flash-lite",
+      "gemini-3.6-flash",
+      "gemini-flash-lite-latest",
+      "gemini-3-flash-preview",
+      "gemini-3.8-flash"
     ];
 
     const modelErrors = [];
@@ -125,37 +126,48 @@ Critical Instructions:
 
     for (const model of candidateModels) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 9000); // 9s timeout per candidate to stay responsive
+      
+      // Try up to 2 times for transient 503 spikes with brief backoff
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 12000); // 12s per call
 
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey
-          },
-          body: payloadBody,
-          signal: ctrl.signal
-        });
-        clearTimeout(timer);
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": apiKey
+            },
+            body: payloadBody,
+            signal: ctrl.signal
+          });
+          clearTimeout(timer);
 
-        if (response.ok) {
-          successfulData = await response.json();
+          if (response.ok) {
+            successfulData = await response.json();
+            break;
+          } else {
+            const errBody = await response.text();
+            modelErrors.push({ model, attempt, status: response.status, error: errBody });
+            if (response.status === 503 && attempt === 0) {
+              await new Promise(r => setTimeout(r, 1200)); // wait 1.2s for transient spike to clear
+              continue;
+            }
+            break;
+          }
+        } catch (fetchErr) {
+          clearTimeout(timer);
+          modelErrors.push({ model, attempt, status: 500, error: fetchErr.message });
           break;
-        } else {
-          const errBody = await response.text();
-          modelErrors.push({ model, status: response.status, error: errBody });
         }
-      } catch (fetchErr) {
-        clearTimeout(timer);
-        modelErrors.push({ model, status: 500, error: fetchErr.message });
       }
+      if (successfulData) break;
     }
 
     if (!successfulData) {
       return res.status(500).json({
-        error: "Failed to parse schedule with candidate models.",
+        error: "All AI models are currently busy or reached free quota.",
         details: modelErrors
       });
     }
