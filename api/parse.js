@@ -100,15 +100,16 @@ Critical Instructions:
       }
     });
 
-    // Validated models available in Google Generative AI catalog
+    // Validated Flash models with high free-tier limits
     const candidateModels = [
       "gemini-2.5-flash",
       "gemini-flash-latest",
-      "gemini-3.5-flash",
-      "gemini-3.1-pro-preview"
+      "gemini-2.5-flash-lite",
+      "gemini-flash-lite-latest",
+      "gemini-3.5-flash"
     ];
 
-    let lastError = null;
+    const modelErrors = [];
     let successfulData = null;
 
     for (const model of candidateModels) {
@@ -128,18 +129,17 @@ Critical Instructions:
           break;
         } else {
           const errBody = await response.text();
-          lastError = { status: response.status, body: errBody, model };
+          modelErrors.push({ model, status: response.status, error: errBody });
         }
       } catch (fetchErr) {
-        lastError = { status: 500, body: fetchErr.message, model };
+        modelErrors.push({ model, status: 500, error: fetchErr.message });
       }
     }
 
     if (!successfulData) {
-      return res.status(lastError?.status || 500).json({
-        error: `Gemini API returned status ${lastError?.status || 500}`,
-        details: lastError?.body || "Failed all model candidates",
-        failedModel: lastError?.model
+      return res.status(500).json({
+        error: "Failed to parse schedule with candidate models.",
+        details: modelErrors
       });
     }
 
